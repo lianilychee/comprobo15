@@ -1,3 +1,6 @@
 [submodule "getting_familiar"]
 	path = getting_familiar
 	url = git@github.com:lianilychee/getting_familiar.git
+[submodule "in_class_day03"]
+	path = in_class_day03
+	url = git@github.com:iangmhill/in_class_day03.git
