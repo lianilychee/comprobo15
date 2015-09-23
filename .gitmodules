@@ -7,3 +7,6 @@
 [submodule "warmup_project"]
 	path = warmup_project
 	url = git@github.com:lianilychee/warmup_project.git
+[submodule "in_class_day04"]
+	path = in_class_day04
+	url = git@github.com:lianilychee/in_class_day04.git
