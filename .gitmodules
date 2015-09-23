@@ -4,3 +4,6 @@
 [submodule "in_class_day03"]
 	path = in_class_day03
 	url = git@github.com:iangmhill/in_class_day03.git
+[submodule "warmup_project"]
+	path = warmup_project
+	url = git@github.com:lianilychee/warmup_project.git
