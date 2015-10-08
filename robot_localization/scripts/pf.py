@@ -54,6 +54,15 @@ class Particle(object):
         orientation_tuple = tf.transformations.quaternion_from_euler(0,0,self.theta)
         return Pose(position=Point(x=self.x,y=self.y,z=0), orientation=Quaternion(x=orientation_tuple[0], y=orientation_tuple[1], z=orientation_tuple[2], w=orientation_tuple[3]))
 
+    def nearest_obstacle(self, ang, dist):
+        """ project where the particle thinks the wall is and return the corresponding coordinates
+        pass in angle in degrees, distance in meters"""
+
+        projected_x = dist * math.cos(math.radians(ang))
+        projected_y = dist * math.sin(math.radians(ang))
+
+        return (projected_x, projected_y)
+
     # TODO: define additional helper functions if needed
 
 class ParticleFilter:
@@ -87,13 +96,14 @@ class ParticleFilter:
         self.odom_frame = "odom"        # the name of the odometry coordinate frame
         self.scan_topic = "scan"        # the topic where we will get laser scans from 
 
-        self.n_particles = 300          # the number of particles to use
+        self.n_particles = 500          # the number of particles to use
 
         self.d_thresh = 0.2             # the amount of linear movement before performing an update
         self.a_thresh = math.pi/6       # the amount of angular movement before performing an update
 
         self.laser_max_distance = 2.0   # maximum penalty to assess in the likelihood field model
 
+        self.sigma = 0.1
         # TODO: define additional constants if needed
 
         # Setup pubs and subs
@@ -114,12 +124,15 @@ class ParticleFilter:
 
         self.current_odom_xy_theta = []
 
-        # request the map from the map server, the map should be of type nav_msgs/OccupancyGrid
-        # TODO: fill in the appropriate service call here.  The resultant map should be assigned be passed
-        #       into the init method for OccupancyField
+        rospy.wait_for_service("static_map")
+        static_map = rospy.ServiceProxy("static_map", GetMap)
+        try:
+            map = static_map().map
+        except:
+            print("Could not receive map")
 
         # for now we have commented out the occupancy field initialization until you can successfully fetch the map
-        #self.occupancy_field = OccupancyField(map)
+        self.occupancy_field = OccupancyField(map)
         self.initialized = True
 
     def update_robot_pose(self):
@@ -130,10 +143,19 @@ class ParticleFilter:
         """
         # first make sure that the particle weights are normalized
         self.normalize_particles()
+        mean_x = 0
+        mean_y = 0
+        mean_theta = 0
+        mean_x_vector = 0
+        mean_y_vector = 0
 
-        # TODO: assign the lastest pose into self.robot_pose as a geometry_msgs.Pose object
-        # just to get started we will fix the robot's pose to always be at the origin
-        self.robot_pose = Pose()
+        for p in self.particle_cloud:
+            mean_x += p.x*p.w
+            mean_y += p.y*p.w
+            mean_x_vector += math.cos(p.theta)*p.w
+            mean_y_vector += math.sin(p.theta)*p.w
+        mean_theta = math.atan2(mean_y_vector, mean_x_vector)
+        self.robot_pose = Particle(x=mean_x,y=mean_y,theta=mean_theta).as_pose()
 
     def update_particles_with_odom(self, msg):
         """ Update the particles using the newly given odometry pose.
@@ -145,41 +167,27 @@ class ParticleFilter:
         """
         new_odom_xy_theta = convert_pose_to_xy_and_theta(self.odom_pose.pose)
         # compute the change in x,y,theta since our last update
-
-        # let's say dx=1, dy=1, dtheta=1
-        # so new_odom_xy_theta = (dx, dy, dtheta)
-        # 
-
         if self.current_odom_xy_theta:
             old_odom_xy_theta = self.current_odom_xy_theta
-            delta = (new_odom_xy_theta[0] - self.current_odom_xy_theta[0],
-                     new_odom_xy_theta[1] - self.current_odom_xy_theta[1],
-                     new_odom_xy_theta[2] - self.current_odom_xy_theta[2])
+            delta = {'x': new_odom_xy_theta[0] - self.current_odom_xy_theta[0],
+                     'y': new_odom_xy_theta[1] - self.current_odom_xy_theta[1],
+                     'theta': new_odom_xy_theta[2] - self.current_odom_xy_theta[2]}
+            delta['r'] = math.sqrt(delta['x']**2 + delta['y']**2)
+            delta['rot'] = angle_diff(math.atan2(delta['y'],delta['x']), old_odom_xy_theta[2])
 
             self.current_odom_xy_theta = new_odom_xy_theta
-
-            r1 = math.atan(delta[1]/delta[0])
-            fwd_dist = sqrt(delta[0]**2 + delta[1]**2)
-            r2 = delta[2] - r1
-
-            self.new_odom_xy_theta =
-                ()
-
         else:
             self.current_odom_xy_theta = new_odom_xy_theta
             return
 
-        # TODO: modify particles using delta
-        # For added difficulty: Implement sample_motion_odometry (Prob Rob p 136)
-
-        new particles
-        new_odom_xy_theta
-
-
+        for p in self.particle_cloud:
+            p.x += delta['r']*math.cos(delta['rot'] + p.theta)
+            p.y += delta['r']*math.sin(delta['rot'] + p.theta)
+            p.theta += delta['theta']
 
     def map_calc_range(self,x,y,theta):
         """ Difficulty Level 3: implement a ray tracing likelihood model... Let me know if you are interested """
-        # TODO: nothing unless you want to try this alternate likelihood model
+        # TODO(NOPE): nothing unless you want to try this alternate likelihood model
         pass
 
     def resample_particles(self):
@@ -190,12 +198,30 @@ class ParticleFilter:
         """
         # make sure the distribution is normalized
         self.normalize_particles()
-        # TODO: fill out the rest of the implementation
+        indices = [i for i in range(len(self.particle_cloud))]
+        probs = [p.w for p in self.particle_cloud]
+        # print('b')
+        # print(probs)
+        new_indices = self.draw_random_sample(choices=indices, probabilities=probs, n=(self.n_particles))
+        new_particles = []
+        for i in new_indices:
+            clean_index = int(i)
+            old_particle = self.particle_cloud[clean_index]
+            new_particles.append(Particle(x=old_particle.x+gauss(0,.05),y=old_particle.y+gauss(0,.05),theta=old_particle.theta+gauss(0,.05)))
+        self.particle_cloud = new_particles
+        self.normalize_particles()
 
     def update_particles_with_laser(self, msg):
         """ Updates the particle weights in response to the scan contained in the msg """
-        # TODO: implement this
-        pass
+        for p in self.particle_cloud:
+            weight_sum = 0
+            for i in range(360):
+                n_o = p.nearest_obstacle(i, msg.ranges[i])
+                error = self.occupancy_field.get_closest_obstacle_distance(n_o[0], n_o[1])
+                weight_sum += math.exp(-error*error/(2*self.sigma**2))
+            p.w = weight_sum / 360
+            # print(p.w)
+        self.normalize_particles()
 
     @staticmethod
     def weighted_values(values, probabilities, size):
@@ -233,21 +259,28 @@ class ParticleFilter:
     def initialize_particle_cloud(self, xy_theta=None):
         """ Initialize the particle cloud.
             Arguments
-            xy_theta: a triple consisting of the mean x, y, and theta (yaw) to initialize the
-                      particle cloud around.  If this input is ommitted, the odometry will be used """
+            xy_theta: a triple consisting of the mean x, y, and theta (yaw) to initialize the particle cloud around.  If this input is ommitted, the odometry will be used """
         if xy_theta == None:
             xy_theta = convert_pose_to_xy_and_theta(self.odom_pose.pose)
         self.particle_cloud = []
-        self.particle_cloud.append(Particle(0,0,0))
-        # TODO create particles
 
+        for i in range(self.n_particles):
+            self.particle_cloud.append(Particle(x=xy_theta[0]+gauss(0,0.25),y=xy_theta[1]+gauss(0,0.25),theta=xy_theta[2]+gauss(0,0.25)))        
         self.normalize_particles()
         self.update_robot_pose()
 
     def normalize_particles(self):
         """ Make sure the particle weights define a valid distribution (i.e. sum to 1.0) """
-        pass
-        # TODO: implement this
+        w = [deepcopy(p.w) for p in self.particle_cloud]
+        z = sum(w)
+        print(z)
+        if z > 0:
+            for i in range(len(self.particle_cloud)):
+                self.particle_cloud[i].w = w[i] / z
+        else:
+            for i in range(len(self.particle_cloud)):
+                self.particle_cloud[i].w = 1/len(self.particle_cloud)
+        print(sum([p.w for p in self.particle_cloud]))
 
     def publish_particles(self, msg):
         particles_conv = []
@@ -288,7 +321,6 @@ class ParticleFilter:
         self.odom_pose = self.tf_listener.transformPose(self.odom_frame, p)
         # store the the odometry pose in a more convenient format (x,y,theta)
         new_odom_xy_theta = convert_pose_to_xy_and_theta(self.odom_pose.pose)
-
         if not(self.particle_cloud):
             # now that we have all of the necessary transforms we can update the particle cloud
             self.initialize_particle_cloud()
@@ -312,6 +344,7 @@ class ParticleFilter:
         """ This method constantly updates the offset of the map and 
             odometry coordinate systems based on the latest results from
             the localizer """
+        (translation, rotation) = convert_pose_inverse_transform(self.robot_pose)
         p = PoseStamped(pose=convert_translation_rotation_to_pose(translation,rotation),
                         header=Header(stamp=msg.header.stamp,frame_id=self.base_frame))
         self.odom_to_map = self.tf_listener.transformPose(self.odom_frame, p)

@@ -96,7 +96,7 @@ class SimpleParticleFilter(object):
 
     def run(self):
         """ main run loop """
-        r = rospy.Rate(5)
+        r = rospy.Rate(0.25)
         while not rospy.is_shutdown():
             if self.last_scan != None:
                 self.pf.integrate_observation(self.last_scan)
