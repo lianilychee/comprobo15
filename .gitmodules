@@ -10,3 +10,6 @@
 [submodule "in_class_day04"]
 	path = in_class_day04
 	url = git@github.com:lianilychee/in_class_day04.git
+[submodule "robot_localization"]
+	path = robot_localization
+	url = git@github.com:lianilychee/robot_localization.git
