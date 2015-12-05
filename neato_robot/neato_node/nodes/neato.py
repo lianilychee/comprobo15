@@ -53,6 +53,8 @@ class NeatoNode:
         rospy.init_node('neato')
 
         self.port = rospy.get_param('~port', "/dev/ttyUSB0")
+        self.robotname = rospy.get_param('~robot', "")
+
         rospy.loginfo("Using port: %s"%(self.port))
 
         self.robot = xv11(self.port)
@@ -162,7 +164,12 @@ class NeatoNode:
                 odom.pose.pose.orientation = quaternion
                 odom.twist.twist.linear.x = dx/dt
                 odom.twist.twist.angular.z = dth/dt
-                self.odomBroadcaster.sendTransform( (self.x, self.y, 0), (quaternion.x, quaternion.y, quaternion.z, quaternion.w), curr_motor_time, "base_link", "odom" )
+
+                # print "    "
+                # print self.robotname
+                # print (type(self.robotname))
+                
+                self.odomBroadcaster.sendTransform( (self.x, self.y, 0), (quaternion.x, quaternion.y, quaternion.z, quaternion.w), curr_motor_time, self.robotname+"_base_link", self.robotname+"_odom" )
                 self.odomPub.publish(odom)
                 #print 'Got motors %f' % (time.time() - t_start)
             except Exception as err:

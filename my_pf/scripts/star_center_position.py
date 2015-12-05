@@ -98,11 +98,10 @@ class MarkerLocator(object):
 class MarkerProcessor(object):
     def __init__(self, use_dummy_transform=False):
         rospy.init_node('star_center_positioning_node')
-        if use_dummy_transform:
-            self.odom_frame_name = "odom_dummy"
-        else:
-            self.odom_frame_name = "odom"
 
+        self.robot_name = rospy.get_param('~robot_name','')
+        self.odom_frame_name = self.robot_name + '_odom'
+        # print self.odom_frame_name
         self.marker_locators = {}
         self.add_marker_locator(MarkerLocator(0,(-6*12*2.54/100.0,0),0))
         self.add_marker_locator(MarkerLocator(1,(0.0,0.0),pi))
@@ -144,21 +143,23 @@ class MarkerProcessor(object):
             angle_diffs = TransformHelpers.angle_diff(euler_angles[0],pi), TransformHelpers.angle_diff(euler_angles[1],0)
             print angle_diffs, marker.pose.pose.position.z
             if (marker.id in self.marker_locators and
-                3.2 <= marker.pose.pose.position.z <= 3.6 and
+                3.0 <= marker.pose.pose.position.z <= 3.6 and
                 fabs(angle_diffs[0]) <= .4 and
                 fabs(angle_diffs[1]) <= .4):
                 print "FOUND IT!"
                 locator = self.marker_locators[marker.id]
                 xy_yaw = list(locator.get_camera_position(marker))
+                print "xy_yaw", xy_yaw
                 xy_yaw[0] += self.pose_correction*cos(xy_yaw[2])
                 xy_yaw[1] += self.pose_correction*sin(xy_yaw[2])
+                print xy_yaw
                 orientation_tuple = quaternion_from_euler(0,0,xy_yaw[2])
                 pose = Pose(position=Point(x=-xy_yaw[0],y=-xy_yaw[1],z=0),
                             orientation=Quaternion(x=orientation_tuple[0], y=orientation_tuple[1], z=orientation_tuple[2], w=orientation_tuple[3]))
                 # TODO: use markers timestamp instead of now() (unfortunately, not populated currently by ar_pose)
                 pose_stamped = PoseStamped(header=Header(stamp=rospy.Time.now(),frame_id="STAR"),pose=pose)
                 try:
-                    offset, quaternion = self.tf_listener.lookupTransform("/base_link", "/base_laser_link", rospy.Time(0))
+                    offset, quaternion = self.tf_listener.lookupTransform(self.robot_name+"_base_link", self.robot_name+"_base_laser_link", rospy.Time(0))
                 except Exception as inst:
                     print "Error", inst
                     return
@@ -172,14 +173,14 @@ class MarkerProcessor(object):
     def fix_STAR_to_odom_transform(self, msg):
         """ Super tricky code to properly update map to odom transform... do not modify this... Difficulty level infinity. """
         (translation, rotation) = TransformHelpers.convert_pose_inverse_transform(msg.pose)
-        p = PoseStamped(pose=TransformHelpers.convert_translation_rotation_to_pose(translation,rotation),header=Header(stamp=rospy.Time(),frame_id="base_link"))
+        p = PoseStamped(pose=TransformHelpers.convert_translation_rotation_to_pose(translation,rotation),header=Header(stamp=rospy.Time(),frame_id=self.robot_name+"_base_link"))
         try:
-            self.tf_listener.waitForTransform("odom","base_link",rospy.Time(),rospy.Duration(1.0))
+            self.tf_listener.waitForTransform(self.robot_name+"_odom",self.robot_name+"_base_link",rospy.Time(),rospy.Duration(1.0))
         except Exception as inst:
             print "whoops", inst
             return
         print "got transform"
-        self.odom_to_STAR = self.tf_listener.transformPose("odom", p)
+        self.odom_to_STAR = self.tf_listener.transformPose(self.robot_name+"_odom", p)
         (self.translation, self.rotation) = TransformHelpers.convert_pose_inverse_transform(self.odom_to_STAR.pose)
 
     def broadcast_last_transform(self):
